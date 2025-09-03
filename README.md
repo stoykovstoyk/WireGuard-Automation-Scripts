@@ -10,17 +10,20 @@ The primary purpose of these scripts is to automate the complex setup and manage
 
 ### Architecture
 
-The project consists of two main components:
+The project consists of three main components:
 
 1. **Server Installation Script** (`install-wireguard-server.sh`): Handles complete server setup including dependencies, keys, configuration, and service management
-2. **Client Management Script** (`add-wireguard-clients.sh`): Manages client addition, IP assignment, and configuration generation
+2. **Client Management Script** (`add-wireguard-clients.sh`): Manages individual client addition, IP assignment, and configuration generation
+3. **Bulk Client Management Script** (`input-wireguard-clients.sh`): Enables bulk creation of client configurations from a list of email addresses
 
-The scripts work together to provide a complete VPN management solution with automated IP conflict detection, QR code generation for mobile clients, and robust error handling.
+The scripts work together to provide a complete VPN management solution with automated IP conflict detection, QR code generation for mobile clients, email-based client naming, and robust error handling.
 
 ## Features
 
 - **Automated Server Setup**: Complete WireGuard server installation with dependency management
-- **Client Management**: Automated client addition with IP assignment and conflict detection
+- **Client Management**: Automated individual client addition with IP assignment and conflict detection
+- **Bulk Client Creation**: Batch processing of multiple clients from email address lists
+- **Email-Based Naming**: Automatic client name sanitization from email addresses
 - **Security Features**: Automatic key generation, firewall configuration, and secure file permissions
 - **Mobile Support**: QR code generation for easy mobile client configuration
 - **Network Configuration**: Automatic IP forwarding, NAT setup, and firewall rules
@@ -61,6 +64,7 @@ cd WireGuard-Automation-Scripts
 ```bash
 chmod +x install-wireguard-server.sh
 chmod +x add-wireguard-clients.sh
+chmod +x input-wireguard-clients.sh
 ```
 
 ### Step 3: Run Server Installation
@@ -119,23 +123,71 @@ sudo ./add-wireguard-clients.sh
 7. Restarts WireGuard service to apply changes
 8. Optionally generates QR code for mobile clients
 
+### Bulk Client Addition
+
+To add multiple VPN clients from a list of email addresses:
+
+```bash
+sudo ./input-wireguard-clients.sh --input-file clients.txt
+```
+
+**Bulk client addition process:**
+1. Reads email addresses from the specified input file (one email per line)
+2. Validates email format and input file accessibility
+3. Sanitizes email addresses to create client names (replaces "@" with "-")
+4. Automatically assigns sequential available IP addresses
+5. Generates unique client keys for each email
+6. Creates individual client configuration files
+7. Updates server configuration with all new peers
+8. Restarts WireGuard service once to apply all changes
+9. Provides summary of successfully created clients
+
+**Input File Format:**
+The input file should contain one email address per line:
+
+```
+user1@example.com
+user2@example.com
+john.doe@company.org
+```
+
+**Client Name Sanitization:**
+- `user@example.com` becomes `user-example.com`
+- `john.doe@company.org` becomes `john.doe-company.org`
+
+**Prerequisites:**
+- Server must be installed using `install-wireguard-server.sh`
+- Input file must exist and be readable
+- Email addresses must be in valid format (containing "@" and ".")
+- Sufficient available IP addresses in the VPN network
+
 ### Example Usage
 
 ```bash
 # Install server
 sudo ./install-wireguard-server.sh
 
-# Add first client
+# Add first client interactively
 sudo ./add-wireguard-clients.sh
 # Enter client name: alice
 # Enter client IP: [press enter for 10.0.0.2]
 # Generate QR code: y
 
-# Add second client
+# Add second client interactively
 sudo ./add-wireguard-clients.sh
 # Enter client name: bob
 # Enter client IP: [press enter for 10.0.0.3]
 # Generate QR code: n
+
+# Create input file for bulk client addition
+echo -e "user1@example.com\nuser2@example.com\nadmin@company.org" > clients.txt
+
+# Add multiple clients from file
+sudo ./input-wireguard-clients.sh --input-file clients.txt
+# Output: Successfully created 3 client(s)
+# ➡ user1-example.com: /etc/wireguard/clients/user1-example.com.conf
+# ➡ user2-example.com: /etc/wireguard/clients/user2-example.com.conf
+# ➡ admin-company.org: /etc/wireguard/clients/admin-company.org.conf
 ```
 
 ### Service Management
