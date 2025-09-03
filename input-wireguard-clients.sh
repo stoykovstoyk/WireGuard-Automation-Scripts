@@ -216,19 +216,103 @@ validate_email() {
     return 0
 }
 
+send_wireguard_email() {
+    local recipient=$1
+    local config_file=$2
+    local client_name=$3
+
+    # Create temporary email file
+    local email_file=$(mktemp)
+    local config_content=$(cat "$config_file")
+
+    cat > "$email_file" << EOF
+To: $recipient
+Subject: $EMAIL_SUBJECT
+From: $FROM_EMAIL
+
+Dear ${recipient%%@*},
+
+Your WireGuard VPN configuration has been created. Below is your client configuration file.
+
+Please save this email and use the configuration below to connect to the VPN.
+
+Configuration for $client_name:
+
+$config_content
+
+Installation Instructions:
+
+1. Download and install WireGuard for your platform:
+   - Windows: https://download.wireguard.com/windows-client/wireguard-installer.exe
+   - macOS: Download from App Store or use brew install wireguard-tools
+   - Linux: sudo apt install wireguard (Ubuntu/Debian)
+   - Android/iOS: Download from respective app stores
+
+2. Create a new tunnel in WireGuard and paste the configuration above
+
+3. Connect to the VPN
+
+If you encounter any issues, please contact your system administrator.
+
+Best regards,
+VPN Administrator
+EOF
+
+    # Send email using curl
+    if curl --silent --ssl-reqd --url "smtp://$SMTP_SERVER:$SMTP_PORT" \
+        --user "$SMTP_USER:$SMTP_PASS" \
+        --mail-from "$FROM_EMAIL" \
+        --mail-rcpt "$recipient" \
+        --upload-file "$email_file"; then
+        echo "[SUCCESS] Email sent to $recipient"
+        rm "$email_file"
+        return 0
+    else
+        echo "[ERROR] Failed to send email to $recipient"
+        rm "$email_file"
+        return 1
+    fi
+}
+
 echo "=== WireGuard Bulk Client Generator ==="
 
 # Parse arguments
 INPUT_FILE=""
+SEND_EMAIL=false
+SMTP_SERVER=""
+SMTP_PORT=587
+FROM_EMAIL=""
+EMAIL_SUBJECT="Your WireGuard VPN Configuration"
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --input-file)
             INPUT_FILE="$2"
             shift 2
             ;;
+        --send-email)
+            SEND_EMAIL=true
+            shift
+            ;;
+        --smtp-server)
+            SMTP_SERVER="$2"
+            shift 2
+            ;;
+        --smtp-port)
+            SMTP_PORT="$2"
+            shift 2
+            ;;
+        --from-email)
+            FROM_EMAIL="$2"
+            shift 2
+            ;;
+        --email-subject)
+            EMAIL_SUBJECT="$2"
+            shift 2
+            ;;
         *)
             echo "[ERROR] Unknown option: $1"
-            echo "Usage: $0 --input-file <file>"
+            echo "Usage: $0 --input-file <file> [--send-email --smtp-server <server> --smtp-port <port> --from-email <email> --email-subject <subject>]"
             exit 1
             ;;
     esac
@@ -259,6 +343,7 @@ mkdir -p "$CLIENTS_DIR"
 # Arrays to track created clients
 created_clients=()
 created_configs=()
+created_emails=()
 
 # Process each email in the input file
 while IFS= read -r email; do
@@ -333,6 +418,7 @@ EOF
     # Track created clients
     created_clients+=("$CLIENT_NAME")
     created_configs+=("$CLIENT_CONF")
+    created_emails+=("$email")
 
     echo "[+] Created client: $CLIENT_NAME with IP: $CLIENT_IP"
 
@@ -345,6 +431,37 @@ if [[ ${#created_clients[@]} -gt 0 ]]; then
 else
     echo "[INFO] No new clients were created"
     exit 0
+fi
+
+# Send emails if requested
+if [[ "$SEND_EMAIL" == true ]]; then
+    # Validate SMTP parameters
+    if [[ -z "$SMTP_SERVER" ]]; then
+        echo "[ERROR] SMTP server not specified. Use --smtp-server"
+        exit 1
+    fi
+    if [[ -z "$FROM_EMAIL" ]]; then
+        echo "[ERROR] From email not specified. Use --from-email"
+        exit 1
+    fi
+    if [[ -z "${SMTP_USER:-}" ]] || [[ -z "${SMTP_PASS:-}" ]]; then
+        echo "[ERROR] SMTP credentials not found. Set SMTP_USER and SMTP_PASS environment variables"
+        exit 1
+    fi
+
+    # Send emails
+    echo "[*] Sending configuration emails..."
+    email_success_count=0
+    for i in "${!created_clients[@]}"; do
+        client_email="${created_emails[$i]}"
+        client_config="${created_configs[$i]}"
+        client_name="${created_clients[$i]}"
+        echo "[*] Sending email to $client_email for $client_name"
+        if send_wireguard_email "$client_email" "$client_config" "$client_name"; then
+            ((email_success_count++))
+        fi
+    done
+    echo "[INFO] Email sending complete: $email_success_count/${#created_clients[@]} emails sent successfully"
 fi
 
 # Output Summary

@@ -161,6 +161,53 @@ john.doe@company.org
 - Email addresses must be in valid format (containing "@" and ".")
 - Sufficient available IP addresses in the VPN network
 
+### Bulk Client Addition with Email Sending
+
+To automatically send WireGuard configurations via email after creation:
+
+```bash
+export SMTP_USER="your-email@example.com"
+export SMTP_PASS="your-smtp-password"
+sudo ./input-wireguard-clients.sh --input-file clients.txt \
+  --send-email \
+  --smtp-server smtp.gmail.com \
+  --smtp-port 587 \
+  --from-email admin@yourcompany.com \
+  --email-subject "Your WireGuard VPN Configuration"
+```
+
+**Email-enabled bulk client addition process:**
+1. Performs all steps from standard bulk client addition
+2. Validates SMTP configuration and credentials
+3. Sends personalized emails with configuration attachments
+4. Provides detailed email delivery status
+5. Continues processing even if some emails fail
+
+**SMTP Configuration Options:**
+- `--smtp-server`: SMTP server address (required with --send-email)
+- `--smtp-port`: SMTP port (default: 587 for TLS)
+- `--from-email`: Sender email address (required with --send-email)
+- `--email-subject`: Email subject line (default: "Your WireGuard VPN Configuration")
+
+**Security Notes:**
+- SMTP credentials should be set via environment variables `SMTP_USER` and `SMTP_PASS`
+- Supports TLS encryption (port 587) and SSL (port 465)
+- Credentials are not stored in command history or logs
+
+**Email Content:**
+Each client receives a customized email containing:
+- Personalized greeting using their email username
+- Complete WireGuard configuration embedded in the email body
+- Platform-specific installation instructions
+- Connection steps
+- Support contact information
+
+**Error Handling:**
+- Invalid SMTP credentials are detected before sending
+- Individual email failures don't stop the process
+- Detailed logging of delivery status
+- Summary of successful vs failed email deliveries
+
 ### Example Usage
 
 ```bash
@@ -182,12 +229,29 @@ sudo ./add-wireguard-clients.sh
 # Create input file for bulk client addition
 echo -e "user1@example.com\nuser2@example.com\nadmin@company.org" > clients.txt
 
-# Add multiple clients from file
+# Add multiple clients from file (without email)
 sudo ./input-wireguard-clients.sh --input-file clients.txt
 # Output: Successfully created 3 client(s)
 # ➡ user1-example.com: /etc/wireguard/clients/user1-example.com.conf
 # ➡ user2-example.com: /etc/wireguard/clients/user2-example.com.conf
 # ➡ admin-company.org: /etc/wireguard/clients/admin-company.org.conf
+
+# Add multiple clients with automatic email sending
+export SMTP_USER="admin@yourcompany.com"
+export SMTP_PASS="your-smtp-password"
+sudo ./input-wireguard-clients.sh --input-file clients.txt \
+  --send-email \
+  --smtp-server smtp.gmail.com \
+  --from-email admin@yourcompany.com
+# Output: Successfully created 3 client(s)
+# [*] Sending configuration emails...
+# [*] Sending email to user1@example.com for user1-example.com
+# [SUCCESS] Email sent to user1@example.com
+# [*] Sending email to user2@example.com for user2-example.com
+# [SUCCESS] Email sent to user2@example.com
+# [*] Sending email to admin@company.org for admin-company.org
+# [SUCCESS] Email sent to admin@company.org
+# [INFO] Email sending complete: 3/3 emails sent successfully
 ```
 
 ### Service Management
