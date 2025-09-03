@@ -96,10 +96,10 @@ check_existing_installation() {
 install_dependencies() {
     log_info "Updating package list..."
     apt update -y
-    
+
     log_info "Installing WireGuard and dependencies..."
-    apt install -y wireguard qrencode ufw
-    
+    apt install -y wireguard qrencode ufw resolveconf
+
     if [[ $? -eq 0 ]]; then
         log_success "Dependencies installed successfully"
     else

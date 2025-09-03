@@ -42,6 +42,7 @@ The scripts automatically install the following dependencies:
 - **wireguard**: Core WireGuard VPN kernel module and tools
 - **qrencode**: QR code generation for mobile clients
 - **ufw**: Uncomplicated Firewall for firewall management
+- **resolveconf**: DNS resolution configuration management
 - **curl**: HTTP client for endpoint detection
 
 ## Installation
