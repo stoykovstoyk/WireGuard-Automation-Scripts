@@ -221,24 +221,35 @@ send_wireguard_email() {
     local config_file=$2
     local client_name=$3
 
-    # Create temporary email file
+    # Debug logging
+    echo "[DEBUG] Attempting to send email to $recipient via $SMTP_SERVER:$SMTP_PORT"
+    echo "[DEBUG] Using SMTP user: $SMTP_USER"
+    echo "[DEBUG] From email: $FROM_EMAIL"
+
+    # Create temporary files
     local email_file=$(mktemp)
+    local boundary="----=_NextPart_$(date +%s)_$(openssl rand -hex 8)"
+
+    # Read config content
     local config_content=$(cat "$config_file")
 
+    # Create MIME email with attachment
     cat > "$email_file" << EOF
 To: $recipient
 Subject: $EMAIL_SUBJECT
 From: $FROM_EMAIL
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="$boundary"
+
+--$boundary
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
 
 Dear ${recipient%%@*},
 
-Your WireGuard VPN configuration has been created. Below is your client configuration file.
+Your WireGuard VPN configuration has been created and is attached to this email.
 
-Please save this email and use the configuration below to connect to the VPN.
-
-Configuration for $client_name:
-
-$config_content
+Please save the attached configuration file and use it to connect to the VPN.
 
 Installation Instructions:
 
@@ -248,7 +259,7 @@ Installation Instructions:
    - Linux: sudo apt install wireguard (Ubuntu/Debian)
    - Android/iOS: Download from respective app stores
 
-2. Create a new tunnel in WireGuard and paste the configuration above
+2. Import the attached .conf file into WireGuard
 
 3. Connect to the VPN
 
@@ -256,10 +267,31 @@ If you encounter any issues, please contact your system administrator.
 
 Best regards,
 VPN Administrator
+
+--$boundary
+Content-Type: application/octet-stream; name="${client_name}.conf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="${client_name}.conf"
+
+$(base64 "$config_file")
+--$boundary--
 EOF
 
+    # Determine protocol
+    local protocol
+    if [[ -n "$SMTP_PROTOCOL" ]]; then
+        protocol="$SMTP_PROTOCOL"
+        echo "[DEBUG] Using specified protocol: $protocol"
+    elif [[ "$SMTP_PORT" == "465" ]]; then
+        protocol="smtps"
+        echo "[DEBUG] Using SMTPS protocol (port 465)"
+    else
+        protocol="smtp"
+        echo "[DEBUG] Using SMTP with STARTTLS (port $SMTP_PORT)"
+    fi
+
     # Send email using curl
-    if curl --silent --ssl-reqd --url "smtp://$SMTP_SERVER:$SMTP_PORT" \
+    if curl --silent --ssl-reqd --insecure --url "$protocol://$SMTP_SERVER:$SMTP_PORT" \
         --user "$SMTP_USER:$SMTP_PASS" \
         --mail-from "$FROM_EMAIL" \
         --mail-rcpt "$recipient" \
@@ -268,7 +300,7 @@ EOF
         rm "$email_file"
         return 0
     else
-        echo "[ERROR] Failed to send email to $recipient"
+        echo "[ERROR] Failed to send email to $recipient (curl exit code: $?)"
         rm "$email_file"
         return 1
     fi
@@ -281,6 +313,7 @@ INPUT_FILE=""
 SEND_EMAIL=false
 SMTP_SERVER=""
 SMTP_PORT=587
+SMTP_PROTOCOL=""
 FROM_EMAIL=""
 EMAIL_SUBJECT="Your WireGuard VPN Configuration"
 
@@ -302,6 +335,10 @@ while [[ $# -gt 0 ]]; do
             SMTP_PORT="$2"
             shift 2
             ;;
+        --smtp-protocol)
+            SMTP_PROTOCOL="$2"
+            shift 2
+            ;;
         --from-email)
             FROM_EMAIL="$2"
             shift 2
@@ -312,7 +349,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "[ERROR] Unknown option: $1"
-            echo "Usage: $0 --input-file <file> [--send-email --smtp-server <server> --smtp-port <port> --from-email <email> --email-subject <subject>]"
+            echo "Usage: $0 --input-file <file> [--send-email --smtp-server <server> --smtp-port <port> --smtp-protocol <smtp|smtps> --from-email <email> --email-subject <subject>]"
             exit 1
             ;;
     esac
@@ -444,6 +481,10 @@ if [[ "$SEND_EMAIL" == true ]]; then
         echo "[ERROR] From email not specified. Use --from-email"
         exit 1
     fi
+    if [[ -n "$SMTP_PROTOCOL" ]] && [[ "$SMTP_PROTOCOL" != "smtp" ]] && [[ "$SMTP_PROTOCOL" != "smtps" ]]; then
+        echo "[ERROR] Invalid SMTP protocol: $SMTP_PROTOCOL. Use 'smtp' or 'smtps'"
+        exit 1
+    fi
     if [[ -z "${SMTP_USER:-}" ]] || [[ -z "${SMTP_PASS:-}" ]]; then
         echo "[ERROR] SMTP credentials not found. Set SMTP_USER and SMTP_PASS environment variables"
         exit 1
@@ -451,14 +492,26 @@ if [[ "$SEND_EMAIL" == true ]]; then
 
     # Send emails
     echo "[*] Sending configuration emails..."
+    echo "[DEBUG] Total clients to email: ${#created_clients[@]}"
     email_success_count=0
     for i in "${!created_clients[@]}"; do
         client_email="${created_emails[$i]}"
         client_config="${created_configs[$i]}"
         client_name="${created_clients[$i]}"
+        echo "[DEBUG] Processing client $((i+1))/${#created_clients[@]}: $client_name -> $client_email"
+        echo "[DEBUG] Config file: $client_config"
+        if [[ -f "$client_config" ]]; then
+            echo "[DEBUG] Config file exists and is readable"
+        else
+            echo "[ERROR] Config file not found: $client_config"
+            continue
+        fi
         echo "[*] Sending email to $client_email for $client_name"
         if send_wireguard_email "$client_email" "$client_config" "$client_name"; then
             ((email_success_count++))
+            echo "[DEBUG] Email sent successfully for $client_name"
+        else
+            echo "[ERROR] Failed to send email for $client_name"
         fi
     done
     echo "[INFO] Email sending complete: $email_success_count/${#created_clients[@]} emails sent successfully"
