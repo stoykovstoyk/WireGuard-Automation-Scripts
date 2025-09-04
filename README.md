@@ -173,40 +173,184 @@ sudo ./input-wireguard-clients.sh --input-file clients.txt \
   --smtp-server smtp.gmail.com \
   --smtp-port 587 \
   --from-email admin@yourcompany.com \
-  --email-subject "Your WireGuard VPN Configuration"
+  --email-subject "Your WireGuard VPN Configuration" \
+  --email-delay 5
 ```
 
 **Email-enabled bulk client addition process:**
 1. Performs all steps from standard bulk client addition
 2. Validates SMTP configuration and credentials
-3. Sends personalized emails with configuration attachments
-4. Provides detailed email delivery status
-5. Continues processing even if some emails fail
+3. Sends personalized emails with configuration file attachments
+4. Provides detailed email delivery status and debug information
+5. Continues processing all clients even if some emails fail
+6. Implements rate limiting protection with configurable delays
 
-**SMTP Configuration Options:**
-- `--smtp-server`: SMTP server address (required with --send-email)
-- `--smtp-port`: SMTP port (default: 587 for TLS)
-- `--from-email`: Sender email address (required with --send-email)
-- `--email-subject`: Email subject line (default: "Your WireGuard VPN Configuration")
+#### SMTP Protocol Support
 
-**Security Notes:**
-- SMTP credentials should be set via environment variables `SMTP_USER` and `SMTP_PASS`
-- Supports TLS encryption (port 587) and SSL (port 465)
-- Credentials are not stored in command history or logs
+The script supports both SMTP and SMTPS protocols with automatic protocol detection:
 
-**Email Content:**
-Each client receives a customized email containing:
-- Personalized greeting using their email username
-- Complete WireGuard configuration embedded in the email body
-- Platform-specific installation instructions
-- Connection steps
-- Support contact information
+- **SMTP (port 587)**: Uses STARTTLS for encrypted connections
+- **SMTPS (port 465)**: Uses implicit SSL/TLS encryption
+- **Manual Override**: Use `--smtp-protocol smtp` or `--smtp-protocol smtps` to force a specific protocol
 
-**Error Handling:**
-- Invalid SMTP credentials are detected before sending
-- Individual email failures don't stop the process
-- Detailed logging of delivery status
-- Summary of successful vs failed email deliveries
+**Protocol Detection Logic:**
+```bash
+# Automatic detection based on port
+if [[ "$SMTP_PORT" == "465" ]]; then
+    protocol="smtps"  # Implicit SSL
+else
+    protocol="smtp"   # STARTTLS
+fi
+```
+
+#### Email Delay Mechanism
+
+To prevent SMTP server rate limiting and connection issues, the script includes a configurable delay between email sends:
+
+- **Default Delay**: 2 seconds between emails
+- **Configurable**: Use `--email-delay <seconds>` to customize
+- **Smart Implementation**: No delay after the last email
+- **Rate Limiting Protection**: Prevents overwhelming SMTP servers
+
+**Example with Custom Delay:**
+```bash
+# 5-second delay between emails
+--email-delay 5
+```
+
+#### Advanced Error Handling and Reporting
+
+The script includes comprehensive error handling to ensure robust operation:
+
+**1. Script Continuation Protection:**
+```bash
+# Runs email sending in isolated subshell with set +e disabled
+(
+    set +e
+    # Email processing loop
+    # Continues even if individual emails fail
+)
+```
+
+**2. Detailed Error Reporting:**
+- Captures curl exit codes and error output
+- Provides specific error messages for different failure types
+- Shows SMTP connection details and authentication status
+- Tracks success/failure counts for all clients
+
+**3. Connection Issue Diagnostics:**
+- Detects TLS certificate verification problems
+- Identifies authentication failures
+- Reports SMTP server connection timeouts
+- Provides debug information for troubleshooting
+
+**4. Graceful Failure Handling:**
+- Individual email failures don't stop the entire process
+- Continues processing remaining clients
+- Provides final summary of successful vs failed deliveries
+- Maintains script stability with proper error isolation
+
+#### Email Content and Attachments
+
+**Attachment Format:**
+- Configuration files are sent as `.conf` attachments
+- Base64 encoded for reliable transmission
+- Named as `{client-name}.conf` for easy identification
+- MIME multipart format ensures compatibility with all email clients
+
+**Email Structure:**
+```
+To: client@example.com
+Subject: Your WireGuard VPN Configuration
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+[Installation instructions and connection steps]
+
+--boundary
+Content-Type: application/octet-stream; name="client-name.conf"
+Content-Disposition: attachment; filename="client-name.conf"
+[Base64 encoded WireGuard configuration]
+
+--boundary--
+```
+
+#### SMTP Configuration Options
+
+| Option | Description | Default | Required |
+|--------|-------------|---------|----------|
+| `--smtp-server` | SMTP server hostname/IP | - | Yes (with --send-email) |
+| `--smtp-port` | SMTP port number | 587 | No |
+| `--smtp-protocol` | Protocol (smtp/smtps) | Auto-detected | No |
+| `--from-email` | Sender email address | - | Yes (with --send-email) |
+| `--email-subject` | Email subject line | "Your WireGuard VPN Configuration" | No |
+| `--email-delay` | Delay between emails (seconds) | 2 | No |
+
+#### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SMTP_USER` | SMTP username/email | Yes (with --send-email) |
+| `SMTP_PASS` | SMTP password | Yes (with --send-email) |
+
+#### Security Features
+
+- **Certificate Handling**: Uses `--insecure` flag to handle self-signed certificates
+- **Credential Protection**: Environment variables prevent credential exposure
+- **TLS Encryption**: Automatic TLS/SSL encryption for secure transmission
+- **Input Validation**: Validates email addresses and SMTP parameters
+
+#### Troubleshooting Email Issues
+
+**Common SMTP Problems and Solutions:**
+
+1. **TLS Certificate Errors:**
+   ```
+   Error: TLS library problem: unknown ca
+   Solution: Script automatically handles with --insecure flag
+   ```
+
+2. **Rate Limiting:**
+   ```
+   Error: Connection refused for subsequent emails
+   Solution: Increase --email-delay value
+   ```
+
+3. **Authentication Failures:**
+   ```
+   Error: SMTP connection error or authentication failure
+   Solution: Verify SMTP_USER and SMTP_PASS credentials
+   ```
+
+4. **Protocol Mismatches:**
+   ```
+   Error: Connection timeout
+   Solution: Use --smtp-protocol to specify correct protocol
+   ```
+
+**Debug Output Example:**
+```
+[DEBUG] Processing client 1/3: user1-example.com -> user1@example.com
+[DEBUG] Config file: /etc/wireguard/clients/user1-example.com.conf
+[*] Sending email to user1@example.com for user1-example.com
+[DEBUG] Attempting to send email to user1@example.com via smtp.gmail.com:587
+[DEBUG] Using SMTP user: admin@company.com
+[SUCCESS] Email sent to user1@example.com
+[DEBUG] Waiting 5 seconds before next email...
+[DEBUG] Processing client 2/3: user2-example.com -> user2@example.com
+...
+[INFO] Email sending complete: 3/3 emails sent successfully
+```
+
+#### Performance and Reliability Features
+
+- **Connection Resilience**: Automatic retry logic for transient failures
+- **Resource Management**: Proper cleanup of temporary files
+- **Progress Tracking**: Real-time status updates for each client
+- **Batch Processing**: Efficient handling of multiple clients
+- **Error Isolation**: Individual failures don't affect other clients
 
 ### Example Usage
 
