@@ -10,17 +10,20 @@ The primary purpose of these scripts is to automate the complex setup and manage
 
 ### Architecture
 
-The project consists of two main components:
+The project consists of three main components:
 
 1. **Server Installation Script** (`install-wireguard-server.sh`): Handles complete server setup including dependencies, keys, configuration, and service management
-2. **Client Management Script** (`add-wireguard-clients.sh`): Manages client addition, IP assignment, and configuration generation
+2. **Client Management Script** (`add-wireguard-clients.sh`): Manages individual client addition, IP assignment, and configuration generation
+3. **Bulk Client Management Script** (`input-wireguard-clients.sh`): Enables bulk creation of client configurations from a list of email addresses
 
-The scripts work together to provide a complete VPN management solution with automated IP conflict detection, QR code generation for mobile clients, and robust error handling.
+The scripts work together to provide a complete VPN management solution with automated IP conflict detection, QR code generation for mobile clients, email-based client naming, and robust error handling.
 
 ## Features
 
 - **Automated Server Setup**: Complete WireGuard server installation with dependency management
-- **Client Management**: Automated client addition with IP assignment and conflict detection
+- **Client Management**: Automated individual client addition with IP assignment and conflict detection
+- **Bulk Client Creation**: Batch processing of multiple clients from email address lists
+- **Email-Based Naming**: Automatic client name sanitization from email addresses
 - **Security Features**: Automatic key generation, firewall configuration, and secure file permissions
 - **Mobile Support**: QR code generation for easy mobile client configuration
 - **Network Configuration**: Automatic IP forwarding, NAT setup, and firewall rules
@@ -61,6 +64,7 @@ cd WireGuard-Automation-Scripts
 ```bash
 chmod +x install-wireguard-server.sh
 chmod +x add-wireguard-clients.sh
+chmod +x input-wireguard-clients.sh
 ```
 
 ### Step 3: Run Server Installation
@@ -119,23 +123,135 @@ sudo ./add-wireguard-clients.sh
 7. Restarts WireGuard service to apply changes
 8. Optionally generates QR code for mobile clients
 
+### Bulk Client Addition
+
+To add multiple VPN clients from a list of email addresses:
+
+```bash
+sudo ./input-wireguard-clients.sh --input-file clients.txt
+```
+
+**Bulk client addition process:**
+1. Reads email addresses from the specified input file (one email per line)
+2. Validates email format and input file accessibility
+3. Sanitizes email addresses to create client names (replaces "@" with "-")
+4. Automatically assigns sequential available IP addresses
+5. Generates unique client keys for each email
+6. Creates individual client configuration files
+7. Updates server configuration with all new peers
+8. Restarts WireGuard service once to apply all changes
+9. Provides summary of successfully created clients
+
+**Input File Format:**
+The input file should contain one email address per line:
+
+```
+user1@example.com
+user2@example.com
+john.doe@company.org
+```
+
+**Client Name Sanitization:**
+- `user@example.com` becomes `user-example.com`
+- `john.doe@company.org` becomes `john.doe-company.org`
+
+**Prerequisites:**
+- Server must be installed using `install-wireguard-server.sh`
+- Input file must exist and be readable
+- Email addresses must be in valid format (containing "@" and ".")
+- Sufficient available IP addresses in the VPN network
+
+### Bulk Client Addition with Email Sending
+
+To automatically send WireGuard configurations via email after creation:
+
+```bash
+export SMTP_USER="your-email@example.com"
+export SMTP_PASS="your-smtp-password"
+sudo ./input-wireguard-clients.sh --input-file clients.txt \
+  --send-email \
+  --smtp-server smtp.gmail.com \
+  --smtp-port 587 \
+  --from-email admin@yourcompany.com \
+  --email-subject "Your WireGuard VPN Configuration"
+```
+
+**Email-enabled bulk client addition process:**
+1. Performs all steps from standard bulk client addition
+2. Validates SMTP configuration and credentials
+3. Sends personalized emails with configuration attachments
+4. Provides detailed email delivery status
+5. Continues processing even if some emails fail
+
+**SMTP Configuration Options:**
+- `--smtp-server`: SMTP server address (required with --send-email)
+- `--smtp-port`: SMTP port (default: 587 for TLS)
+- `--from-email`: Sender email address (required with --send-email)
+- `--email-subject`: Email subject line (default: "Your WireGuard VPN Configuration")
+
+**Security Notes:**
+- SMTP credentials should be set via environment variables `SMTP_USER` and `SMTP_PASS`
+- Supports TLS encryption (port 587) and SSL (port 465)
+- Credentials are not stored in command history or logs
+
+**Email Content:**
+Each client receives a customized email containing:
+- Personalized greeting using their email username
+- Complete WireGuard configuration embedded in the email body
+- Platform-specific installation instructions
+- Connection steps
+- Support contact information
+
+**Error Handling:**
+- Invalid SMTP credentials are detected before sending
+- Individual email failures don't stop the process
+- Detailed logging of delivery status
+- Summary of successful vs failed email deliveries
+
 ### Example Usage
 
 ```bash
 # Install server
 sudo ./install-wireguard-server.sh
 
-# Add first client
+# Add first client interactively
 sudo ./add-wireguard-clients.sh
 # Enter client name: alice
 # Enter client IP: [press enter for 10.0.0.2]
 # Generate QR code: y
 
-# Add second client
+# Add second client interactively
 sudo ./add-wireguard-clients.sh
 # Enter client name: bob
 # Enter client IP: [press enter for 10.0.0.3]
 # Generate QR code: n
+
+# Create input file for bulk client addition
+echo -e "user1@example.com\nuser2@example.com\nadmin@company.org" > clients.txt
+
+# Add multiple clients from file (without email)
+sudo ./input-wireguard-clients.sh --input-file clients.txt
+# Output: Successfully created 3 client(s)
+# ➡ user1-example.com: /etc/wireguard/clients/user1-example.com.conf
+# ➡ user2-example.com: /etc/wireguard/clients/user2-example.com.conf
+# ➡ admin-company.org: /etc/wireguard/clients/admin-company.org.conf
+
+# Add multiple clients with automatic email sending
+export SMTP_USER="admin@yourcompany.com"
+export SMTP_PASS="your-smtp-password"
+sudo ./input-wireguard-clients.sh --input-file clients.txt \
+  --send-email \
+  --smtp-server smtp.gmail.com \
+  --from-email admin@yourcompany.com
+# Output: Successfully created 3 client(s)
+# [*] Sending configuration emails...
+# [*] Sending email to user1@example.com for user1-example.com
+# [SUCCESS] Email sent to user1@example.com
+# [*] Sending email to user2@example.com for user2-example.com
+# [SUCCESS] Email sent to user2@example.com
+# [*] Sending email to admin@company.org for admin-company.org
+# [SUCCESS] Email sent to admin@company.org
+# [INFO] Email sending complete: 3/3 emails sent successfully
 ```
 
 ### Service Management
