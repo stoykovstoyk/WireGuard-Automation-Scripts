@@ -290,17 +290,24 @@ EOF
         echo "[DEBUG] Using SMTP with STARTTLS (port $SMTP_PORT)"
     fi
 
-    # Send email using curl
-    if curl --silent --ssl-reqd --insecure --url "$protocol://$SMTP_SERVER:$SMTP_PORT" \
+    # Send email using curl with error capture
+    local curl_output
+    local curl_exit_code
+    curl_output=$(curl --silent --ssl-reqd --insecure --url "$protocol://$SMTP_SERVER:$SMTP_PORT" \
         --user "$SMTP_USER:$SMTP_PASS" \
         --mail-from "$FROM_EMAIL" \
         --mail-rcpt "$recipient" \
-        --upload-file "$email_file"; then
+        --upload-file "$email_file" 2>&1)
+    curl_exit_code=$?
+
+    if [[ $curl_exit_code -eq 0 ]]; then
         echo "[SUCCESS] Email sent to $recipient"
         rm "$email_file"
         return 0
     else
-        echo "[ERROR] Failed to send email to $recipient (curl exit code: $?)"
+        echo "[ERROR] Failed to send email to $recipient"
+        echo "[DEBUG] Curl exit code: $curl_exit_code"
+        echo "[DEBUG] Curl output: $curl_output"
         rm "$email_file"
         return 1
     fi
@@ -316,6 +323,7 @@ SMTP_PORT=587
 SMTP_PROTOCOL=""
 FROM_EMAIL=""
 EMAIL_SUBJECT="Your WireGuard VPN Configuration"
+EMAIL_DELAY=2
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -347,9 +355,13 @@ while [[ $# -gt 0 ]]; do
             EMAIL_SUBJECT="$2"
             shift 2
             ;;
+        --email-delay)
+            EMAIL_DELAY="$2"
+            shift 2
+            ;;
         *)
             echo "[ERROR] Unknown option: $1"
-            echo "Usage: $0 --input-file <file> [--send-email --smtp-server <server> --smtp-port <port> --smtp-protocol <smtp|smtps> --from-email <email> --email-subject <subject>]"
+            echo "Usage: $0 --input-file <file> [--send-email --smtp-server <server> --smtp-port <port> --smtp-protocol <smtp|smtps> --from-email <email> --email-subject <subject> --email-delay <seconds>]"
             exit 1
             ;;
     esac
@@ -494,27 +506,38 @@ if [[ "$SEND_EMAIL" == true ]]; then
     echo "[*] Sending configuration emails..."
     echo "[DEBUG] Total clients to email: ${#created_clients[@]}"
     email_success_count=0
-    for i in "${!created_clients[@]}"; do
-        client_email="${created_emails[$i]}"
-        client_config="${created_configs[$i]}"
-        client_name="${created_clients[$i]}"
-        echo "[DEBUG] Processing client $((i+1))/${#created_clients[@]}: $client_name -> $client_email"
-        echo "[DEBUG] Config file: $client_config"
-        if [[ -f "$client_config" ]]; then
-            echo "[DEBUG] Config file exists and is readable"
-        else
-            echo "[ERROR] Config file not found: $client_config"
-            continue
-        fi
-        echo "[*] Sending email to $client_email for $client_name"
-        if send_wireguard_email "$client_email" "$client_config" "$client_name"; then
-            ((email_success_count++))
-            echo "[DEBUG] Email sent successfully for $client_name"
-        else
-            echo "[ERROR] Failed to send email for $client_name"
-        fi
-    done
-    echo "[INFO] Email sending complete: $email_success_count/${#created_clients[@]} emails sent successfully"
+
+    # Run email sending in a subshell with set +e to prevent script exit on failures
+    (
+        set +e
+        for i in "${!created_clients[@]}"; do
+            client_email="${created_emails[$i]}"
+            client_config="${created_configs[$i]}"
+            client_name="${created_clients[$i]}"
+            echo "[DEBUG] Processing client $((i+1))/${#created_clients[@]}: $client_name -> $client_email"
+            echo "[DEBUG] Config file: $client_config"
+            if [[ -f "$client_config" ]]; then
+                echo "[DEBUG] Config file exists and is readable"
+            else
+                echo "[ERROR] Config file not found: $client_config"
+                continue
+            fi
+            echo "[*] Sending email to $client_email for $client_name"
+            if send_wireguard_email "$client_email" "$client_config" "$client_name"; then
+                ((email_success_count++))
+                echo "[DEBUG] Email sent successfully for $client_name"
+            else
+                echo "[ERROR] Failed to send email for $client_name"
+            fi
+
+            # Add delay between emails to avoid rate limiting (except for the last email)
+            if [[ $i -lt $((${#created_clients[@]}-1)) ]]; then
+                echo "[DEBUG] Waiting $EMAIL_DELAY seconds before next email..."
+                sleep "$EMAIL_DELAY"
+            fi
+        done
+        echo "[INFO] Email sending complete: $email_success_count/${#created_clients[@]} emails sent successfully"
+    )
 fi
 
 # Output Summary
